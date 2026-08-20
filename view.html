@@ -12,6 +12,7 @@
     <nav>
       <a href="#" id="edit-link" hidden>✎ Éditer</a>
       <a href="index.html">Pages</a>
+      <a href="#" id="logout-link">Déconnexion</a>
     </nav>
   </header>
   <main>
@@ -22,29 +23,47 @@
   <script src="js/vendor/marked.min.js"></script>
   <script src="js/app.js"></script>
   <script>
-    (async () => {
-      const slug = new URLSearchParams(location.search).get("slug");
-      const content = document.getElementById("page-content");
-      const meta = document.getElementById("page-meta");
-      const editLink = document.getElementById("edit-link");
-      if (!slug) {
-        content.textContent = "Aucune page demandée.";
-        return;
-      }
-      try {
-        const raw = await RPGG.fetchPage(slug);
-        const parsed = RPGG.parseFrontMatter(raw);
-        document.title = `${parsed.meta.title || slug} — RPGG`;
-        meta.textContent = parsed.meta.updated
-          ? `Mis à jour le ${new Date(parsed.meta.updated).toLocaleString("fr-FR")}`
-          : "";
-        content.innerHTML = RPGG.renderMarkdown(parsed.body);
-        editLink.href = `editor.html?slug=${encodeURIComponent(slug)}`;
-        editLink.hidden = false;
-      } catch (err) {
-        content.textContent = `Erreur : ${err.message}`;
-      }
-    })();
+    const session = RPGG.requireSession();
+    if (session) {
+      document.getElementById("logout-link").addEventListener("click", (e) => {
+        e.preventDefault();
+        RPGG.clearSession();
+        location.href = "login.html";
+      });
+
+      (async () => {
+        const params = new URLSearchParams(location.search);
+        const slug = params.get("slug");
+        const visibility = params.get("v") === "gm" ? "gm" : "public";
+        const content = document.getElementById("page-content");
+        const meta = document.getElementById("page-meta");
+        const editLink = document.getElementById("edit-link");
+
+        if (!slug) {
+          content.textContent = "Aucune page demandée.";
+          return;
+        }
+        if (visibility === "gm" && session.role !== "gm") {
+          content.textContent = "Accès refusé : cette page est réservée au MJ.";
+          return;
+        }
+        try {
+          const raw = await RPGG.fetchPage(slug, visibility, session.token);
+          const parsed = RPGG.parseFrontMatter(raw);
+          document.title = `${parsed.meta.title || slug} — RPGG`;
+          meta.textContent = parsed.meta.updated
+            ? `Mis à jour le ${new Date(parsed.meta.updated).toLocaleString("fr-FR")}`
+            : "";
+          content.innerHTML = RPGG.renderMarkdown(parsed.body);
+          if (session.role === "gm") {
+            editLink.href = `editor.html?slug=${encodeURIComponent(slug)}&v=${visibility}`;
+            editLink.hidden = false;
+          }
+        } catch (err) {
+          content.textContent = `Erreur : ${err.message}`;
+        }
+      })();
+    }
   </script>
 </body>
 </html>

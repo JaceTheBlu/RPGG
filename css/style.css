@@ -129,7 +129,8 @@ textarea#md-input {
   flex-wrap: wrap;
 }
 
-.toolbar input[type="text"] {
+.toolbar input[type="text"],
+.toolbar select {
   background: var(--bg-panel);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -205,6 +206,72 @@ dialog p.hint { color: var(--fg-muted); font-size: 0.8rem; }
   margin-bottom: 1.5rem;
   padding-bottom: 1rem;
   border-bottom: 1px solid var(--border);
+}
+
+.login-main {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+}
+
+.login-card .brand {
+  color: var(--accent);
+  margin-top: 0;
+}
+
+.login-card label {
+  display: block;
+  margin-top: 1rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.login-card input {
+  width: 100%;
+  margin-top: 0.35rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  font-family: var(--mono);
+}
+
+.login-card button {
+  width: 100%;
+  margin-top: 1.25rem;
+}
+
+.role-badge {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.15rem 0.5rem;
+  margin-left: 0.5rem;
+}
+
+.gm-tag {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 0.1rem 0.4rem;
+  margin-left: 0.5rem;
 }
 
 @media (max-width: 700px) {

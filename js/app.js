@@ -1,8 +1,25 @@
-/* Shared helpers: GitHub-as-a-database for the static RPG CRM site. */
+/* Shared helpers: GitHub-as-a-database for the static RPG CRM site.
+ *
+ * Security model: this site has no backend. "Login" means the visitor
+ * supplies their own GitHub personal access token, which is used for
+ * every read and write against the GitHub API. Real access control only
+ * exists if the repo is PRIVATE — GitHub then refuses reads/writes to
+ * anyone whose token isn't a collaborator. The "gm" vs "player" role and
+ * per-page visibility below are a soft UI-level gate on top of that: a
+ * player collaborator with API knowledge could still fetch a GM-only file
+ * directly. That's an acceptable trade-off for a home campaign, not a
+ * defense against a determined attacker.
+ */
 
 const RPGG = (() => {
-  const CONTENT_DIR = "content/pages";
+  const PUBLIC_DIR = "content/pages/public";
+  const GM_DIR = "content/pages/gm";
+  const USERS_PATH = "content/users.json";
   const DEFAULTS = { owner: "jacetheblu", repo: "rpgg", branch: "main" };
+
+  function dirFor(visibility) {
+    return visibility === "gm" ? GM_DIR : PUBLIC_DIR;
+  }
 
   function getConfig() {
     const stored = JSON.parse(localStorage.getItem("rpgg.config") || "{}");
@@ -14,17 +31,72 @@ const RPGG = (() => {
     localStorage.setItem("rpgg.config", JSON.stringify({ ...current, ...partial }));
   }
 
-  function getToken() {
-    return localStorage.getItem("rpgg.token") || "";
-  }
+  // --- Session (login) -----------------------------------------------
 
-  function setToken(token) {
-    if (token) {
-      localStorage.setItem("rpgg.token", token);
-    } else {
-      localStorage.removeItem("rpgg.token");
+  function getSession() {
+    try {
+      return JSON.parse(localStorage.getItem("rpgg.session") || "null");
+    } catch {
+      return null;
     }
   }
+
+  function setSession(session) {
+    localStorage.setItem("rpgg.session", JSON.stringify(session));
+  }
+
+  function clearSession() {
+    localStorage.removeItem("rpgg.session");
+  }
+
+  function isGm() {
+    return getSession()?.role === "gm";
+  }
+
+  /** Call at the top of every protected page. Redirects to login if needed. */
+  function requireSession() {
+    const session = getSession();
+    if (!session || !session.token) {
+      location.href = "login.html";
+      return null;
+    }
+    return session;
+  }
+
+  async function fetchUsers(token) {
+    const data = await ghGet(USERS_PATH, token);
+    if (!data) return [];
+    return JSON.parse(fromBase64Utf8(data.content));
+  }
+
+  /** Validates a token against GitHub, then against content/users.json. */
+  async function login(token) {
+    const meRes = await fetch("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    });
+    if (!meRes.ok) throw new Error("Token GitHub invalide.");
+    const me = await meRes.json();
+
+    let users;
+    try {
+      users = await fetchUsers(token);
+    } catch (err) {
+      throw new Error(`Impossible de lire la liste des utilisateurs autorisés : ${err.message}`);
+    }
+    const entry = users.find((u) => u.username.toLowerCase() === me.login.toLowerCase());
+    if (!entry) throw new Error(`${me.login} n'est pas dans la liste des utilisateurs autorisés (content/users.json).`);
+
+    const session = {
+      token,
+      username: me.login,
+      displayName: entry.displayName || me.login,
+      role: entry.role === "gm" ? "gm" : "player",
+    };
+    setSession(session);
+    return session;
+  }
+
+  // --- Low-level GitHub API helpers -----------------------------------
 
   function slugify(title) {
     return title
@@ -41,21 +113,30 @@ const RPGG = (() => {
     return `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
   }
 
-  function rawUrl(path) {
-    const { owner, repo, branch } = getConfig();
-    return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+  function authHeaders(token) {
+    return { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
   }
 
-  async function ghRequest(path, options = {}) {
-    const token = getToken();
-    if (!token) throw new Error("Aucun token GitHub configuré. Ouvre les réglages (⚙) pour en ajouter un.");
+  async function ghGet(path, token) {
+    const { branch } = getConfig();
+    const res = await fetch(`${apiUrl(path)}?ref=${branch}`, { headers: authHeaders(token) });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`GitHub API ${res.status} sur ${path}`);
+    return res.json();
+  }
+
+  async function ghList(path, token) {
+    const { branch } = getConfig();
+    const res = await fetch(`${apiUrl(path)}?ref=${branch}`, { headers: authHeaders(token) });
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`Impossible de lister ${path} (${res.status}).`);
+    return res.json();
+  }
+
+  async function ghWrite(path, token, options) {
     const res = await fetch(apiUrl(path), {
       ...options,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github+json",
-        ...(options.headers || {}),
-      },
+      headers: { ...authHeaders(token), ...(options.headers || {}) },
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -72,23 +153,26 @@ const RPGG = (() => {
     return decodeURIComponent(escape(atob(b64.replace(/\n/g, ""))));
   }
 
-  async function listPages() {
-    const { branch } = getConfig();
-    const res = await fetch(`${apiUrl(CONTENT_DIR)}?ref=${branch}`, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (res.status === 404) return [];
-    if (!res.ok) throw new Error(`Impossible de lister les pages (${res.status}).`);
-    const items = await res.json();
-    return items
-      .filter((it) => it.type === "file" && it.name.endsWith(".md"))
-      .map((it) => ({ slug: it.name.replace(/\.md$/, ""), path: it.path }));
+  // --- Pages ------------------------------------------------------------
+
+  async function listPages(token, { includeGm }) {
+    const dirs = includeGm ? [["public", PUBLIC_DIR], ["gm", GM_DIR]] : [["public", PUBLIC_DIR]];
+    const results = [];
+    for (const [visibility, dir] of dirs) {
+      const items = await ghList(dir, token);
+      for (const it of items) {
+        if (it.type === "file" && it.name.endsWith(".md")) {
+          results.push({ slug: it.name.replace(/\.md$/, ""), visibility });
+        }
+      }
+    }
+    return results;
   }
 
-  async function fetchPage(slug) {
-    const res = await fetch(`${rawUrl(`${CONTENT_DIR}/${slug}.md`)}?t=${Date.now()}`);
-    if (!res.ok) throw new Error(`Page introuvable (${res.status}).`);
-    return res.text();
+  async function fetchPage(slug, visibility, token) {
+    const data = await ghGet(`${dirFor(visibility)}/${slug}.md`, token);
+    if (!data) throw new Error("Page introuvable.");
+    return fromBase64Utf8(data.content);
   }
 
   function parseFrontMatter(raw) {
@@ -107,23 +191,17 @@ const RPGG = (() => {
     return `---\n${lines.join("\n")}\n---\n\n`;
   }
 
-  async function getFileSha(path) {
-    const { branch } = getConfig();
-    const res = await fetch(`${apiUrl(path)}?ref=${branch}`, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`Erreur lors de la vérification du fichier (${res.status}).`);
-    const data = await res.json();
-    return data.sha;
+  async function getFileSha(path, token) {
+    const data = await ghGet(path, token);
+    return data ? data.sha : null;
   }
 
-  async function publishPage({ slug, title, markdown }) {
-    const path = `${CONTENT_DIR}/${slug}.md`;
+  async function publishPage({ slug, title, markdown, visibility, token }) {
+    const path = `${dirFor(visibility)}/${slug}.md`;
     const { branch } = getConfig();
-    const sha = await getFileSha(path);
-    const content = buildFrontMatter({ title, updated: new Date().toISOString() }) + markdown;
-    return ghRequest(path, {
+    const sha = await getFileSha(path, token);
+    const content = buildFrontMatter({ title, visibility, updated: new Date().toISOString() }) + markdown;
+    return ghWrite(path, token, {
       method: "PUT",
       body: JSON.stringify({
         message: sha ? `Update page: ${title}` : `Add page: ${title}`,
@@ -134,12 +212,12 @@ const RPGG = (() => {
     });
   }
 
-  async function deletePage(slug, title) {
-    const path = `${CONTENT_DIR}/${slug}.md`;
+  async function deletePage(slug, visibility, title, token) {
+    const path = `${dirFor(visibility)}/${slug}.md`;
     const { branch } = getConfig();
-    const sha = await getFileSha(path);
+    const sha = await getFileSha(path, token);
     if (!sha) throw new Error("Page introuvable.");
-    return ghRequest(path, {
+    return ghWrite(path, token, {
       method: "DELETE",
       body: JSON.stringify({ message: `Delete page: ${title || slug}`, sha, branch }),
     });
@@ -150,11 +228,14 @@ const RPGG = (() => {
   }
 
   return {
-    CONTENT_DIR,
     getConfig,
     setConfig,
-    getToken,
-    setToken,
+    getSession,
+    setSession,
+    clearSession,
+    isGm,
+    requireSession,
+    login,
     slugify,
     listPages,
     fetchPage,
