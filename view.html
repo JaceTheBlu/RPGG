@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPGG</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="site">
+    <a class="brand" href="index.html">RPGG</a>
+    <nav>
+      <a href="#" id="edit-link" hidden>✎ Éditer</a>
+      <a href="index.html">Pages</a>
+    </nav>
+  </header>
+  <main>
+    <div class="page-meta" id="page-meta"></div>
+    <div class="page-content" id="page-content">Chargement…</div>
+  </main>
+
+  <script src="js/vendor/marked.min.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (async () => {
+      const slug = new URLSearchParams(location.search).get("slug");
+      const content = document.getElementById("page-content");
+      const meta = document.getElementById("page-meta");
+      const editLink = document.getElementById("edit-link");
+      if (!slug) {
+        content.textContent = "Aucune page demandée.";
+        return;
+      }
+      try {
+        const raw = await RPGG.fetchPage(slug);
+        const parsed = RPGG.parseFrontMatter(raw);
+        document.title = `${parsed.meta.title || slug} — RPGG`;
+        meta.textContent = parsed.meta.updated
+          ? `Mis à jour le ${new Date(parsed.meta.updated).toLocaleString("fr-FR")}`
+          : "";
+        content.innerHTML = RPGG.renderMarkdown(parsed.body);
+        editLink.href = `editor.html?slug=${encodeURIComponent(slug)}`;
+        editLink.hidden = false;
+      } catch (err) {
+        content.textContent = `Erreur : ${err.message}`;
+      }
+    })();
+  </script>
+</body>
+</html>

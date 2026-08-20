@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Éditeur — RPGG</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="site">
+    <a class="brand" href="index.html">RPGG</a>
+    <nav>
+      <a href="#" id="settings-link">⚙ Réglages</a>
+      <a href="index.html">Pages</a>
+    </nav>
+  </header>
+  <main>
+    <div class="toolbar">
+      <input type="text" id="title-input" placeholder="Titre de la page" />
+      <button id="publish-btn">Publier</button>
+      <button id="delete-btn" class="danger" hidden>Supprimer</button>
+      <span id="status-msg"></span>
+    </div>
+    <div class="editor-layout">
+      <textarea id="md-input" placeholder="# Écris ton Markdown ici…" spellcheck="false"></textarea>
+      <div id="md-preview"></div>
+    </div>
+  </main>
+
+  <dialog id="settings-dialog">
+    <h2>Réglages de publication</h2>
+    <p class="hint">
+      Le site est statique : publier une page revient à committer un fichier <code>.md</code>
+      dans ce dépôt via l'API GitHub, directement depuis ton navigateur. Le token n'est
+      jamais envoyé ailleurs qu'à <code>api.github.com</code> et reste stocké en local
+      (localStorage) sur cet appareil.
+    </p>
+    <label for="owner-input">Propriétaire (owner)</label>
+    <input type="text" id="owner-input" />
+    <label for="repo-input">Dépôt (repo)</label>
+    <input type="text" id="repo-input" />
+    <label for="branch-input">Branche</label>
+    <input type="text" id="branch-input" />
+    <label for="token-input">Token GitHub (fine-grained, droit "Contents: read & write")</label>
+    <input type="password" id="token-input" placeholder="ghp_…" autocomplete="off" />
+    <div class="dialog-actions">
+      <button type="button" class="secondary" id="settings-cancel">Fermer</button>
+      <button type="button" id="settings-save">Enregistrer</button>
+    </div>
+  </dialog>
+
+  <script src="js/vendor/marked.min.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const editSlug = params.get("slug");
+
+    const titleInput = document.getElementById("title-input");
+    const mdInput = document.getElementById("md-input");
+    const preview = document.getElementById("md-preview");
+    const statusMsg = document.getElementById("status-msg");
+    const publishBtn = document.getElementById("publish-btn");
+    const deleteBtn = document.getElementById("delete-btn");
+    const dialog = document.getElementById("settings-dialog");
+
+    function updatePreview() {
+      preview.innerHTML = RPGG.renderMarkdown(mdInput.value || "");
+    }
+    mdInput.addEventListener("input", updatePreview);
+
+    document.getElementById("settings-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      const cfg = RPGG.getConfig();
+      document.getElementById("owner-input").value = cfg.owner;
+      document.getElementById("repo-input").value = cfg.repo;
+      document.getElementById("branch-input").value = cfg.branch;
+      document.getElementById("token-input").value = RPGG.getToken();
+      dialog.showModal();
+    });
+    document.getElementById("settings-cancel").addEventListener("click", () => dialog.close());
+    document.getElementById("settings-save").addEventListener("click", () => {
+      RPGG.setConfig({
+        owner: document.getElementById("owner-input").value.trim(),
+        repo: document.getElementById("repo-input").value.trim(),
+        branch: document.getElementById("branch-input").value.trim() || "main",
+      });
+      RPGG.setToken(document.getElementById("token-input").value.trim());
+      dialog.close();
+    });
+
+    function setStatus(msg, type) {
+      statusMsg.textContent = msg;
+      statusMsg.className = type || "";
+    }
+
+    let currentSlug = null;
+
+    async function loadForEdit(slug) {
+      try {
+        setStatus("Chargement de la page…");
+        const raw = await RPGG.fetchPage(slug);
+        const { meta, body } = RPGG.parseFrontMatter(raw);
+        titleInput.value = meta.title || slug;
+        mdInput.value = body.trim();
+        currentSlug = slug;
+        deleteBtn.hidden = false;
+        updatePreview();
+        setStatus("");
+      } catch (err) {
+        setStatus(`Erreur : ${err.message}`, "error");
+      }
+    }
+
+    publishBtn.addEventListener("click", async () => {
+      const title = titleInput.value.trim();
+      if (!title) return setStatus("Un titre est requis.", "error");
+      if (!mdInput.value.trim()) return setStatus("Le contenu est vide.", "error");
+      const slug = currentSlug || RPGG.slugify(title);
+      publishBtn.disabled = true;
+      setStatus("Publication en cours…");
+      try {
+        await RPGG.publishPage({ slug, title, markdown: mdInput.value });
+        currentSlug = slug;
+        deleteBtn.hidden = false;
+        setStatus("Publié ✓", "ok");
+      } catch (err) {
+        setStatus(`Erreur : ${err.message}`, "error");
+      } finally {
+        publishBtn.disabled = false;
+      }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+      if (!currentSlug) return;
+      if (!confirm(`Supprimer la page "${titleInput.value}" ?`)) return;
+      try {
+        await RPGG.deletePage(currentSlug, titleInput.value);
+        location.href = "index.html";
+      } catch (err) {
+        setStatus(`Erreur : ${err.message}`, "error");
+      }
+    });
+
+    if (editSlug) {
+      loadForEdit(editSlug);
+    } else {
+      updatePreview();
+    }
+  </script>
+</body>
+</html>
