@@ -48,7 +48,7 @@
           return;
         }
         try {
-          const raw = await RPGG.fetchPage(slug, visibility, session.token);
+          const raw = await RPGG.fetchPage(slug, visibility);
           const parsed = RPGG.parseFrontMatter(raw);
           document.title = `${parsed.meta.title || slug} — RPGG`;
           meta.textContent = parsed.meta.updated

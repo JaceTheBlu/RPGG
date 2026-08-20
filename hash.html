@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Générateur de hash — RPGG</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="site">
+    <a class="brand" href="index.html">RPGG</a>
+    <nav><a href="index.html">Pages</a></nav>
+  </header>
+  <main>
+    <h1>Générateur d'entrée pour content/users.json</h1>
+    <p class="hint">
+      Outil local (rien n'est envoyé nulle part) pour préparer l'entrée d'un
+      nouveau joueur ou du MJ. Remplis le formulaire, copie le JSON généré
+      dans <code>content/users.json</code> et publie-le (commit direct ou
+      via GitHub, l'éditeur en ligne n'a pas accès à ce fichier).
+    </p>
+    <div class="toolbar">
+      <input type="text" id="username-input" placeholder="Identifiant (ex: alice)" />
+      <input type="text" id="displayname-input" placeholder="Nom affiché (ex: Alice)" />
+      <select id="role-select">
+        <option value="player">Joueur</option>
+        <option value="gm">MJ</option>
+      </select>
+      <input type="password" id="password-input" placeholder="Mot de passe" />
+      <button id="generate-btn">Générer</button>
+    </div>
+    <pre id="output" style="background:#16150f;border:1px solid var(--border);border-radius:var(--radius);padding:1rem;white-space:pre-wrap;"></pre>
+  </main>
+
+  <script src="js/app.js"></script>
+  <script>
+    document.getElementById("generate-btn").addEventListener("click", async () => {
+      const username = document.getElementById("username-input").value.trim();
+      const displayName = document.getElementById("displayname-input").value.trim() || username;
+      const role = document.getElementById("role-select").value;
+      const password = document.getElementById("password-input").value;
+      const output = document.getElementById("output");
+      if (!username || !password) {
+        output.textContent = "Identifiant et mot de passe requis.";
+        return;
+      }
+      const passwordHash = await RPGG.sha256Hex(password);
+      output.textContent = JSON.stringify({ username, displayName, role, passwordHash }, null, 2) + ",";
+    });
+  </script>
+</body>
+</html>

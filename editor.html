@@ -72,7 +72,7 @@
       async function loadForEdit(slug, visibility) {
         try {
           setStatus("Chargement de la page…");
-          const raw = await RPGG.fetchPage(slug, visibility, session.token);
+          const raw = await RPGG.fetchPage(slug, visibility);
           const { meta, body } = RPGG.parseFrontMatter(raw);
           titleInput.value = meta.title || slug;
           visibilitySelect.value = visibility;

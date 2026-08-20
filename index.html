@@ -38,7 +38,7 @@
         const list = document.getElementById("page-list");
         if (session.role === "gm") document.getElementById("new-page-link").hidden = false;
         try {
-          const pages = await RPGG.listPages(session.token, { includeGm: session.role === "gm" });
+          const pages = await RPGG.listPages({ includeGm: session.role === "gm" });
           if (!pages.length) {
             list.innerHTML = session.role === "gm"
               ? '<li class="empty-state">Aucune page publiée pour le moment. <a href="editor.html">Crée la première</a>.</li>'

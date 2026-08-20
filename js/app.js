@@ -1,14 +1,16 @@
 /* Shared helpers: GitHub-as-a-database for the static RPG CRM site.
  *
- * Security model: this site has no backend. "Login" means the visitor
- * supplies their own GitHub personal access token, which is used for
- * every read and write against the GitHub API. Real access control only
- * exists if the repo is PRIVATE — GitHub then refuses reads/writes to
- * anyone whose token isn't a collaborator. The "gm" vs "player" role and
- * per-page visibility below are a soft UI-level gate on top of that: a
- * player collaborator with API knowledge could still fetch a GM-only file
- * directly. That's an acceptable trade-off for a home campaign, not a
- * defense against a determined attacker.
+ * Security model: the repo is PUBLIC (private hosting costs money on this
+ * plan), so every .md file is already fetchable by anyone who knows or
+ * guesses the raw GitHub URL — logging in on this site does not change
+ * that. The password screen is a soft "who are you" gate for normal use
+ * of the UI (pick your identity, get the matching interface), not real
+ * access control. Don't put anything in content/pages/gm/ that a
+ * motivated player couldn't be trusted to stumble onto.
+ *
+ * Only the GM can create/update/delete pages, so only the GM's browser
+ * needs a GitHub personal access token (entered at login, never stored in
+ * the repo). Everyone else just reads public GitHub API endpoints.
  */
 
 const RPGG = (() => {
@@ -49,48 +51,54 @@ const RPGG = (() => {
     localStorage.removeItem("rpgg.session");
   }
 
-  function isGm() {
-    return getSession()?.role === "gm";
-  }
-
-  /** Call at the top of every protected page. Redirects to login if needed. */
+  /** Call at the top of every page. Redirects to login if needed. */
   function requireSession() {
     const session = getSession();
-    if (!session || !session.token) {
+    if (!session) {
       location.href = "login.html";
       return null;
     }
     return session;
   }
 
-  async function fetchUsers(token) {
-    const data = await ghGet(USERS_PATH, token);
+  async function sha256Hex(text) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function fetchUsers() {
+    const data = await ghGet(USERS_PATH);
     if (!data) return [];
     return JSON.parse(fromBase64Utf8(data.content));
   }
 
-  /** Validates a token against GitHub, then against content/users.json. */
-  async function login(token) {
-    const meRes = await fetch("https://api.github.com/user", {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
-    });
-    if (!meRes.ok) throw new Error("Token GitHub invalide.");
-    const me = await meRes.json();
+  /**
+   * Checks username/password against content/users.json. `token` is only
+   * required (and only used) when the matched user has role "gm".
+   */
+  async function login(username, password, token) {
+    const users = await fetchUsers();
+    const entry = users.find((u) => u.username.toLowerCase() === username.trim().toLowerCase());
+    if (!entry) throw new Error("Utilisateur inconnu.");
 
-    let users;
-    try {
-      users = await fetchUsers(token);
-    } catch (err) {
-      throw new Error(`Impossible de lire la liste des utilisateurs autorisés : ${err.message}`);
+    const hash = await sha256Hex(password);
+    if (hash !== entry.passwordHash) throw new Error("Mot de passe incorrect.");
+
+    const role = entry.role === "gm" ? "gm" : "player";
+    if (role === "gm") {
+      if (!token) throw new Error("Un token GitHub est requis pour le rôle MJ.");
+      const meRes = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+      });
+      if (!meRes.ok) throw new Error("Token GitHub invalide.");
     }
-    const entry = users.find((u) => u.username.toLowerCase() === me.login.toLowerCase());
-    if (!entry) throw new Error(`${me.login} n'est pas dans la liste des utilisateurs autorisés (content/users.json).`);
 
     const session = {
-      token,
-      username: me.login,
-      displayName: entry.displayName || me.login,
-      role: entry.role === "gm" ? "gm" : "player",
+      username: entry.username,
+      displayName: entry.displayName || entry.username,
+      role,
+      token: role === "gm" ? token : null,
     };
     setSession(session);
     return session;
@@ -114,7 +122,9 @@ const RPGG = (() => {
   }
 
   function authHeaders(token) {
-    return { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" };
+    const headers = { Accept: "application/vnd.github+json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
   }
 
   async function ghGet(path, token) {
@@ -134,6 +144,7 @@ const RPGG = (() => {
   }
 
   async function ghWrite(path, token, options) {
+    if (!token) throw new Error("Action réservée au MJ (token GitHub manquant).");
     const res = await fetch(apiUrl(path), {
       ...options,
       headers: { ...authHeaders(token), ...(options.headers || {}) },
@@ -155,11 +166,11 @@ const RPGG = (() => {
 
   // --- Pages ------------------------------------------------------------
 
-  async function listPages(token, { includeGm }) {
+  async function listPages({ includeGm }) {
     const dirs = includeGm ? [["public", PUBLIC_DIR], ["gm", GM_DIR]] : [["public", PUBLIC_DIR]];
     const results = [];
     for (const [visibility, dir] of dirs) {
-      const items = await ghList(dir, token);
+      const items = await ghList(dir);
       for (const it of items) {
         if (it.type === "file" && it.name.endsWith(".md")) {
           results.push({ slug: it.name.replace(/\.md$/, ""), visibility });
@@ -169,8 +180,8 @@ const RPGG = (() => {
     return results;
   }
 
-  async function fetchPage(slug, visibility, token) {
-    const data = await ghGet(`${dirFor(visibility)}/${slug}.md`, token);
+  async function fetchPage(slug, visibility) {
+    const data = await ghGet(`${dirFor(visibility)}/${slug}.md`);
     if (!data) throw new Error("Page introuvable.");
     return fromBase64Utf8(data.content);
   }
@@ -233,8 +244,8 @@ const RPGG = (() => {
     getSession,
     setSession,
     clearSession,
-    isGm,
     requireSession,
+    sha256Hex,
     login,
     slugify,
     listPages,

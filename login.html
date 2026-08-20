@@ -11,13 +11,16 @@
     <div class="login-card">
       <h1 class="brand">RPGG</h1>
       <p class="hint">
-        Connecte-toi avec un token GitHub personnel (fine-grained, permission
-        "Contents" sur ce dépôt — lecture seule si tu es simple joueur,
-        lecture/écriture si tu es MJ). Ton compte GitHub doit être listé dans
-        <code>content/users.json</code>.
+        Ce site est statique et le dépôt est public : ce mot de passe choisit
+        ton identité et ton interface, ce n'est pas un vrai coffre-fort — les
+        pages restent techniquement accessibles à qui connaît l'URL GitHub.
       </p>
-      <label for="token-input">Token GitHub</label>
-      <input type="password" id="token-input" placeholder="ghp_… ou github_pat_…" autocomplete="off" />
+      <label for="username-input">Nom d'utilisateur</label>
+      <input type="text" id="username-input" autocomplete="username" />
+      <label for="password-input">Mot de passe</label>
+      <input type="password" id="password-input" autocomplete="current-password" />
+      <label for="token-input" id="token-label" hidden>Token GitHub (MJ, pour publier)</label>
+      <input type="password" id="token-input" placeholder="ghp_… ou github_pat_…" autocomplete="off" hidden />
       <button id="login-btn">Se connecter</button>
       <p id="status-msg"></p>
     </div>
@@ -25,20 +28,34 @@
 
   <script src="js/app.js"></script>
   <script>
+    const usernameInput = document.getElementById("username-input");
+    const passwordInput = document.getElementById("password-input");
+    const tokenLabel = document.getElementById("token-label");
     const tokenInput = document.getElementById("token-input");
     const btn = document.getElementById("login-btn");
     const statusMsg = document.getElementById("status-msg");
 
     if (RPGG.getSession()) location.href = "index.html";
 
+    // We don't know the role until the password checks out, so always show
+    // the token field once a username is typed — it's simply ignored for
+    // players.
+    usernameInput.addEventListener("input", () => {
+      const show = usernameInput.value.trim().length > 0;
+      tokenLabel.hidden = !show;
+      tokenInput.hidden = !show;
+    });
+
     async function doLogin() {
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
       const token = tokenInput.value.trim();
-      if (!token) return;
+      if (!username || !password) return;
       btn.disabled = true;
       statusMsg.textContent = "Connexion…";
       statusMsg.className = "";
       try {
-        await RPGG.login(token);
+        await RPGG.login(username, password, token);
         location.href = "index.html";
       } catch (err) {
         statusMsg.textContent = err.message;
@@ -48,9 +65,11 @@
     }
 
     btn.addEventListener("click", doLogin);
-    tokenInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") doLogin();
-    });
+    for (const input of [usernameInput, passwordInput, tokenInput]) {
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") doLogin();
+      });
+    }
   </script>
 </body>
 </html>
