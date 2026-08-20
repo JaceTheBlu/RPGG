@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPGG</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="site">
+    <a class="brand" href="index.html">RPGG</a>
+    <nav>
+      <a href="editor.html">+ Nouvelle page</a>
+    </nav>
+  </header>
+  <main>
+    <h1>Pages</h1>
+    <ul class="page-list" id="page-list">
+      <li class="empty-state">Chargement…</li>
+    </ul>
+  </main>
+
+  <script src="js/vendor/marked.min.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    (async () => {
+      const list = document.getElementById("page-list");
+      try {
+        const pages = await RPGG.listPages();
+        if (!pages.length) {
+          list.innerHTML = '<li class="empty-state">Aucune page publiée pour le moment. <a href="editor.html">Crée la première</a>.</li>';
+          return;
+        }
+        list.innerHTML = "";
+        for (const page of pages) {
+          const li = document.createElement("li");
+          li.innerHTML = `<a href="view.html?slug=${encodeURIComponent(page.slug)}">${page.slug}</a>`;
+          list.appendChild(li);
+        }
+      } catch (err) {
+        list.innerHTML = `<li class="empty-state">Erreur de chargement : ${err.message}</li>`;
+      }
+    })();
+  </script>
+</body>
+</html>
